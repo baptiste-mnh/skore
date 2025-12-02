@@ -15,16 +15,26 @@ export const DeltaInputModal = ({
 
   if (!isOpen) return null;
 
+  // Vibration helper function
+  const vibrate = (duration: number = 10) => {
+    if ("vibrate" in navigator) {
+      navigator.vibrate(duration);
+    }
+  };
+
   const handlePress = (num: string) => {
+    vibrate(10); // Short vibration for number presses
     if (value === "0" && num !== "DEL") setValue(num);
     else setValue((prev) => prev + num);
   };
 
   const handleDelete = () => {
+    vibrate(15); // Slightly longer vibration for delete
     setValue((prev) => (prev.length > 1 ? prev.slice(0, -1) : "0"));
   };
 
   const handleConfirm = () => {
+    vibrate(20); // Longer vibration for confirm
     const numValue = parseInt(value, 10);
     if (numValue > 0) {
       onSubmit(isPositive ? numValue : -numValue);
