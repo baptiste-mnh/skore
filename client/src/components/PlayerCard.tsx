@@ -57,10 +57,31 @@ export const PlayerCard = ({
     <div className="relative">
       <div
         className={clsx(
-          "bg-white p-3 rounded-2xl shadow-sm border border-alabaster",
+          "bg-white p-3 rounded-2xl shadow-sm border border-alabaster relative",
           isMe && "ring-2 ring-gold border-gold"
         )}
       >
+        {/* Delete button - top right */}
+        {!player.isOnline && isHost && (
+          <button
+            onClick={() => {
+              onShowConfirm(
+                `Remove ${player.name} from the game?`,
+                () => onRemovePlayer(player.id),
+                {
+                  title: "Remove Player",
+                  confirmText: "Remove",
+                  variant: "danger",
+                }
+              );
+            }}
+            className="absolute top-3 right-3 w-8 h-8 flex items-center justify-center rounded-full bg-prussian/10 text-prussian hover:bg-prussian/20 hover:text-prussian active:scale-95 transition-all opacity-50 hover:opacity-100"
+            title="Remove player"
+          >
+            <Trash2 size={16} />
+          </button>
+        )}
+
         {/* Row 1: Avatar + Name + Badges */}
         <div className="flex items-center gap-2 mb-3">
           <div className="relative shrink-0">
@@ -124,26 +145,6 @@ export const PlayerCard = ({
           </div>
         </div>
       </div>
-
-      {!player.isOnline && isHost && (
-        <button
-          onClick={() => {
-            onShowConfirm(
-              `Remove ${player.name} from the game?`,
-              () => onRemovePlayer(player.id),
-              {
-                title: "Remove Player",
-                confirmText: "Remove",
-                variant: "danger",
-              }
-            );
-          }}
-          className="absolute -right-12 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center rounded-full bg-prussian/10 text-prussian hover:bg-prussian/20 hover:text-prussian active:scale-95 transition-all opacity-50 hover:opacity-100"
-          title="Remove player"
-        >
-          <Trash2 size={16} />
-        </button>
-      )}
     </div>
   );
 };

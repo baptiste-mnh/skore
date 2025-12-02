@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import clsx from "clsx";
 import { X } from "lucide-react";
 
@@ -14,9 +14,18 @@ export const AddOfflinePlayerModal = ({
   const [name, setName] = useState("");
   const [avatar, setAvatar] = useState("🎮");
 
-  if (!isOpen) return null;
-
   const avatars = ["🎮", "🎯", "🎲", "🃏", "🎪", "🎨", "🎭", "🎬", "🎸", "🎺"];
+
+  useEffect(() => {
+    if (isOpen) {
+      // Select a random emoji when modal opens
+      const randomAvatar = avatars[Math.floor(Math.random() * avatars.length)];
+      setAvatar(randomAvatar);
+      setName("");
+    }
+  }, [isOpen]);
+
+  if (!isOpen) return null;
 
   const handleSubmit = () => {
     if (name.trim()) {
