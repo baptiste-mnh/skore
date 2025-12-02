@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+@theme {
+  /* Colors - Black & Gold Elegance */
+  --color-primary: #fca311;
+  --color-black: #000000;
+  --color-prussian: #14213d;
+  --color-gold: #fca311;
+  --color-alabaster: #e5e5e5;
+  --color-white: #ffffff;
+
+  /* Font - Science Gothic */
+  --font-sans: "Science Gothic", system-ui, sans-serif;
+}
+
+/* Custom Utilities if needed */
