@@ -1,4 +1,4 @@
-import { Github, LogOut, Plus, RefreshCw, Share2 } from "lucide-react";
+import { Github, LogOut, RefreshCw, Share2, UserPlus } from "lucide-react";
 import { useEffect, useState } from "react";
 import QRCode from "react-qr-code";
 import type { Player } from "./context/GameContext";
@@ -604,7 +604,7 @@ function App() {
                   className="p-2 text-gold bg-gold/10 rounded-full hover:bg-gold/20 active:scale-95 transition-transform"
                   title="Add offline player"
                 >
-                  <Plus size={20} />
+                  <UserPlus size={20} />
                 </button>
               )}
             </div>
