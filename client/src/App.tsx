@@ -1,4 +1,11 @@
-import { Github, LogOut, RefreshCw, Share2, UserPlus } from "lucide-react";
+import {
+  Github,
+  LogOut,
+  RefreshCw,
+  Share2,
+  UserPlus,
+  Trophy,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import QRCode from "react-qr-code";
 import type { Player } from "./context/GameContext";
@@ -13,6 +20,7 @@ import NumpadModal from "./components/NumpadModal";
 import DeltaInputModal from "./components/DeltaInputModal";
 import ShareModal from "./components/ShareModal";
 import EditProfileModal from "./components/EditProfileModal";
+import LeaderboardModal from "./components/LeaderboardModal";
 import PlayerCard from "./components/PlayerCard";
 import SocketStatus from "./components/SocketStatus";
 import Logo from "./components/Logo";
@@ -49,6 +57,7 @@ function App() {
   const [deltaInputOpen, setDeltaInputOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [editProfileOpen, setEditProfileOpen] = useState(false);
+  const [leaderboardOpen, setLeaderboardOpen] = useState(false);
   const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
   const [isDeltaPositive, setIsDeltaPositive] = useState(true);
 
@@ -146,7 +155,9 @@ function App() {
   const proceedWithJoin = (takeControlOfPlayerId?: string) => {
     // Use inputName if provided, otherwise use default placeholder name
     const name = inputName || `${defaultName.adjective} ${defaultName.animal}`;
-    const avatar = inputName ? getRandomAvatar() : animalMap[defaultName.animal];
+    const avatar = inputName
+      ? getRandomAvatar()
+      : animalMap[defaultName.animal];
     localStorage.setItem("skore_name", name);
 
     if (takeControlOfPlayerId) {
@@ -315,8 +326,8 @@ function App() {
     // Simple version: if room in URL, show join interface only
     if (hasRoomInUrl) {
       return (
-        <div className="min-h-screen bg-white">
-          <div className="p-6 flex flex-col items-center justify-center min-h-screen max-w-md mx-auto">
+        <div className="min-h-screen bg-white flex flex-col">
+          <div className="flex-1 flex flex-col items-center justify-center p-6 max-w-md mx-auto w-full">
             <Logo className="text-4xl text-gold mb-2" />
             <p className="text-slate-500 mb-8 text-center">
               Join Room{" "}
@@ -355,40 +366,40 @@ function App() {
                 </a>
               </div>
             </div>
+          </div>
 
-            {/* Footer */}
-            <div className="mt-8 text-center text-slate-400 text-xs pb-8">
-              <div className="flex items-center justify-center gap-2 mb-2">
-                <a
-                  href="https://github.com/baptiste-mnh/skore"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="hover:text-slate-600 transition-colors"
-                >
-                  <Github size={16} />
-                </a>
-                <span>•</span>
-                <a
-                  href="https://github.com/baptiste-mnh/skore/blob/main/LICENSE"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="hover:text-slate-600 transition-colors"
-                >
-                  MIT License
-                </a>
-              </div>
-              <p>
-                Made with <span className="text-red-400">♥</span> by{" "}
-                <a
-                  href="https://github.com/baptiste-mnh"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="font-bold hover:text-gold transition-colors"
-                >
-                  @baptiste-mnh
-                </a>
-              </p>
+          {/* Footer */}
+          <div className="text-center text-slate-400 text-xs pb-8 px-6">
+            <div className="flex items-center justify-center gap-2 mb-2">
+              <a
+                href="https://github.com/baptiste-mnh/skore"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-slate-600 transition-colors"
+              >
+                <Github size={16} />
+              </a>
+              <span>•</span>
+              <a
+                href="https://github.com/baptiste-mnh/skore/blob/main/LICENSE"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-slate-600 transition-colors"
+              >
+                MIT License
+              </a>
             </div>
+            <p>
+              Made with <span className="text-red-400">♥</span> by{" "}
+              <a
+                href="https://github.com/baptiste-mnh"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-bold hover:text-gold transition-colors"
+              >
+                @baptiste-mnh
+              </a>
+            </p>
           </div>
 
           {/* TakeControlModal for joining with offline players */}
@@ -413,11 +424,11 @@ function App() {
 
     // Normal lobby: no room ID in URL
     return (
-      <div className="min-h-screen bg-white">
-        <div className="p-6 flex flex-col items-center justify-center min-h-screen max-w-md mx-auto">
+      <div className="min-h-screen bg-white flex flex-col">
+        <div className="flex-1 flex flex-col items-center justify-center p-6 max-w-md mx-auto w-full">
           <Logo className="text-4xl text-[#fca311] mb-2" />
-          <p className="text-slate-500 mb-8 text-center">
-            Effortless score tracking for any game.
+          <p className="text-slate-500 mb-2 text-center">
+            Real-time multiplayer score sharing
           </p>
 
           <div className="w-full space-y-4">
@@ -486,40 +497,40 @@ function App() {
                 </div>
               )}
           </div>
+        </div>
 
-          {/* Footer */}
-          <div className="mt-8 text-center text-slate-400 text-xs pb-8">
-            <div className="flex items-center justify-center gap-2 mb-2">
-              <a
-                href="https://github.com/baptiste-mnh/skore"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="hover:text-slate-600 transition-colors"
-              >
-                <Github size={16} />
-              </a>
-              <span>•</span>
-              <a
-                href="https://github.com/baptiste-mnh/skore/blob/main/LICENSE"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="hover:text-slate-600 transition-colors"
-              >
-                MIT License
-              </a>
-            </div>
-            <p>
-              Made with <span className="text-red-400">♥</span> by{" "}
-              <a
-                href="https://github.com/baptiste-mnh"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-bold hover:text-indigo-500 transition-colors"
-              >
-                @baptiste-mnh
-              </a>
-            </p>
+        {/* Footer */}
+        <div className="text-center text-slate-400 text-xs pb-8 px-6">
+          <div className="flex items-center justify-center gap-2 mb-2">
+            <a
+              href="https://github.com/baptiste-mnh/skore"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-slate-600 transition-colors"
+            >
+              <Github size={16} />
+            </a>
+            <span>•</span>
+            <a
+              href="https://github.com/baptiste-mnh/skore/blob/main/LICENSE"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-slate-600 transition-colors"
+            >
+              MIT License
+            </a>
           </div>
+          <p>
+            Made with <span className="text-red-400">♥</span> by{" "}
+            <a
+              href="https://github.com/baptiste-mnh"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-bold hover:text-indigo-500 transition-colors"
+            >
+              @baptiste-mnh
+            </a>
+          </p>
         </div>
 
         {/* TakeControlModal for joining with offline players */}
@@ -606,6 +617,13 @@ function App() {
                     ? `${gameState.currentPlayer.name.slice(0, 15)}...`
                     : gameState.currentPlayer?.name}
                 </span>
+              </button>
+              <button
+                onClick={() => setLeaderboardOpen(true)}
+                className="p-2 text-gold bg-gold/10 rounded-full hover:bg-gold/20 active:scale-95 transition-transform"
+                title="View leaderboard"
+              >
+                <Trophy size={20} />
               </button>
               <button
                 onClick={() => setShareOpen(true)}
@@ -729,6 +747,13 @@ function App() {
           onSubmit={handleProfileUpdate}
           initialName={gameState.currentPlayer?.name || ""}
           initialAvatar={gameState.currentPlayer?.avatar || "🦁"}
+        />
+
+        <LeaderboardModal
+          isOpen={leaderboardOpen}
+          onClose={() => setLeaderboardOpen(false)}
+          players={gameState.players}
+          currentPlayerId={gameState.currentPlayer?.id || null}
         />
 
         <AlertModal
