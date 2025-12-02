@@ -118,6 +118,15 @@ function App() {
     return animalMap[randomAnimal];
   };
 
+  const getInitials = (name: string) => {
+    return name
+      .split(" ")
+      .map((word) => word[0])
+      .join("")
+      .toUpperCase()
+      .slice(0, 2);
+  };
+
   // Generate default placeholder name once
   const [defaultName] = useState<{
     adjective: string;
@@ -584,7 +593,14 @@ function App() {
                 <div className="w-8 h-8 bg-white rounded-full flex items-center justify-center shadow-sm text-lg">
                   {gameState.currentPlayer?.avatar}
                 </div>
-                <span className="text-sm font-bold text-prussian max-w-[120px] truncate">
+                {/* Mobile: initiales seulement */}
+                <span className="sm:hidden text-sm font-bold text-prussian">
+                  {gameState.currentPlayer?.name
+                    ? getInitials(gameState.currentPlayer.name)
+                    : ""}
+                </span>
+                {/* Desktop: nom complet */}
+                <span className="hidden sm:inline text-sm font-bold text-prussian max-w-[120px] truncate">
                   {gameState.currentPlayer?.name &&
                   gameState.currentPlayer.name.length > 15
                     ? `${gameState.currentPlayer.name.slice(0, 15)}...`

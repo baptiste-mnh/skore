@@ -57,67 +57,71 @@ export const PlayerCard = ({
     <div className="relative">
       <div
         className={clsx(
-          "bg-white p-4 rounded-2xl shadow-sm border border-alabaster flex items-center justify-between",
+          "bg-white p-3 rounded-2xl shadow-sm border border-alabaster",
           isMe && "ring-2 ring-gold border-gold"
         )}
       >
-        <div className="flex items-center gap-3">
-          <div className="relative">
-            <div className="w-12 h-12 bg-gold/10 rounded-full flex items-center justify-center text-2xl">
+        {/* Row 1: Avatar + Name + Badges */}
+        <div className="flex items-center gap-2 mb-3">
+          <div className="relative shrink-0">
+            <div className="w-10 h-10 bg-gold/10 rounded-full flex items-center justify-center text-xl">
               {player.avatar}
             </div>
             {!player.isOnline && (
               <span className="absolute bottom-0 right-0 w-3 h-3 bg-slate-400 border-2 border-white rounded-full"></span>
             )}
           </div>
-          <div>
-            <div className="flex items-center gap-1">
-              <h3 className="font-bold text-black">
-                {player.name}
-                {!player.isOnline && (
-                  <span className="text-slate-500 font-normal"> (Offline)</span>
-                )}
-              </h3>
-              {player.isHost && (
-                <Crown size={14} className="text-gold fill-gold" />
-              )}
-              {isMe && (
-                <span className="px-1.5 py-0.5 bg-gold/10 text-gold text-[10px] font-bold rounded-full uppercase tracking-wider">
-                  Me
-                </span>
-              )}
-            </div>
-            <div className="text-xs text-slate-500">Score: {player.score}</div>
+
+          <h3 className="font-bold text-xl text-black truncate flex-1">
+            {player.name}
+            {!player.isOnline && (
+              <span className="text-slate-500 font-normal"> (Offline)</span>
+            )}
+          </h3>
+
+          <div className="flex items-center gap-1 shrink-0">
+            {player.isHost && (
+              <Crown size={12} className="text-gold fill-gold" />
+            )}
+            {isMe && (
+              <span className="px-1.5 py-0.5 bg-gold/10 text-gold text-[10px] font-bold rounded-full uppercase tracking-wider">
+                Me
+              </span>
+            )}
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
-          <button
-            onClick={() => onOpenDeltaInput(player, false)}
-            className="w-10 h-10 flex items-center justify-center rounded-full bg-alabaster text-slate-600 active:scale-95 transition-transform"
-          >
-            <Minus size={20} />
-          </button>
+        {/* Row 2: Score + Buttons */}
+        <div className="flex items-center gap-3">
           <div
             onClick={() => onOpenNumpad(player)}
-            className="flex items-center gap-1 cursor-pointer active:scale-95 transition-transform select-none"
+            className="flex items-center gap-1 cursor-pointer active:scale-95 transition-transform select-none flex-1 ml-4"
           >
-            <Pen size={12} className="text-slate-400" />
+            <Pen size={11} className="text-slate-400" />
             <span
               className={clsx(
-                "text-2xl font-bold transition-colors",
+                "text-3xl font-bold transition-colors",
                 isAnimating && "text-gold"
               )}
             >
               {displayScore}
             </span>
           </div>
-          <button
-            onClick={() => onOpenDeltaInput(player, true)}
-            className="w-10 h-10 flex items-center justify-center rounded-full bg-gold text-white active:scale-95 transition-transform shadow-md shadow-gold/20"
-          >
-            <Plus size={20} />
-          </button>
+
+          <div className="flex items-center gap-3 shrink-0">
+            <button
+              onClick={() => onOpenDeltaInput(player, false)}
+              className="w-12 h-12 flex items-center justify-center rounded-full bg-alabaster text-slate-600 active:scale-95 transition-transform"
+            >
+              <Minus size={18} />
+            </button>
+            <button
+              onClick={() => onOpenDeltaInput(player, true)}
+              className="w-12 h-12 flex items-center justify-center rounded-full bg-gold text-white active:scale-95 transition-transform shadow-md shadow-gold/20"
+            >
+              <Plus size={18} />
+            </button>
+          </div>
         </div>
       </div>
 
