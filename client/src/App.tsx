@@ -359,7 +359,14 @@ function App() {
                   <Github size={16} />
                 </a>
                 <span>•</span>
-                <span>MIT License</span>
+                <a
+                  href="https://github.com/baptiste-mnh/skore/blob/main/LICENSE"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-slate-600 transition-colors"
+                >
+                  MIT License
+                </a>
               </div>
               <p>
                 Made with <span className="text-red-400">♥</span> by{" "}
@@ -483,7 +490,14 @@ function App() {
                 <Github size={16} />
               </a>
               <span>•</span>
-              <span>MIT License</span>
+              <a
+                href="https://github.com/baptiste-mnh/skore/blob/main/LICENSE"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-slate-600 transition-colors"
+              >
+                MIT License
+              </a>
             </div>
             <p>
               Made with <span className="text-red-400">♥</span> by{" "}
@@ -642,11 +656,29 @@ function App() {
                 ? gameState.logs[gameState.logs.length - 1]
                 : "Waiting for players..."}
             </div>
-            <div className="flex items-center justify-center gap-3 mt-2">
+            {/* Footer - Single Line */}
+            <div className="flex items-center justify-center gap-2 text-xs text-slate-400 mt-2 pointer-events-auto">
               <Logo className="text-xs text-slate-300" />
-              <div className="pointer-events-auto">
-                <SocketStatus isConnected={isConnected} socketId={socket?.id} />
-              </div>
+              <span>•</span>
+              <SocketStatus isConnected={isConnected} socketId={socket?.id} />
+              <span>•</span>
+              <a
+                href="https://github.com/baptiste-mnh/skore"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-slate-600 transition-colors"
+              >
+                <Github size={14} />
+              </a>
+              <span>•</span>
+              <a
+                href="https://github.com/baptiste-mnh/skore/blob/main/LICENSE"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-slate-600 transition-colors"
+              >
+                MIT
+              </a>
             </div>
           </div>
         </div>
