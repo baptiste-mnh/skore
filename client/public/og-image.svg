@@ -1,0 +1,25 @@
+<svg width="1200" height="630" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="1200" height="630" fill="#ffffff"/>
+
+  <!-- Subtle gradient overlay -->
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#fca311;stop-opacity:0.05" />
+      <stop offset="100%" style="stop-color:#fca311;stop-opacity:0" />
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#grad)"/>
+
+  <!-- Logo/Brand -->
+  <text x="600" y="220" font-family="system-ui, -apple-system, sans-serif" font-size="140" font-weight="900" fill="#fca311" text-anchor="middle" letter-spacing="-8">Skore.</text>
+
+  <!-- Tagline -->
+  <text x="600" y="320" font-family="system-ui, -apple-system, sans-serif" font-size="36" font-weight="600" fill="#000000" text-anchor="middle">Real-time Score Tracker for Any Game</text>
+
+  <!-- Features -->
+  <text x="600" y="400" font-family="system-ui, -apple-system, sans-serif" font-size="24" font-weight="400" fill="#333333" text-anchor="middle">Create a room • Share the code • Track scores together</text>
+
+  <!-- URL -->
+  <text x="600" y="540" font-family="system-ui, -apple-system, sans-serif" font-size="28" font-weight="600" fill="#fca311" text-anchor="middle">skore.manach.dev</text>
+</svg>

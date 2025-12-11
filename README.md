@@ -2,6 +2,8 @@
 
 **Skore** - Real-time multiplayer score tracker with WebRTC peer-to-peer connections. No account needed, just share a room code and start tracking scores for any game. Built with React, Socket.io signaling, and direct P2P communication.
 
+🎮 **[Try it now at skore.manach.dev](https://skore.manach.dev)**
+
 ## Features
 
 - **Peer-to-peer**: Direct WebRTC connections between players—no backend server storing your data
