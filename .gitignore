@@ -49,3 +49,6 @@ temp/
 CLAUDE.md
 .cursor/
 
+# Private documentation
+private/
+

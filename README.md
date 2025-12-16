@@ -1,8 +1,11 @@
 # Skore
 
-**Skore** - Real-time multiplayer score tracker with Socket.io synchronization. No account needed, just share a room code and start tracking scores for any game. Built with React, TypeScript, and WebRTC infrastructure for future peer-to-peer features.
+**Skore** - Real-time multiplayer score tracker with Socket.io synchronization. No account needed, just share a room code and start tracking scores for any game. Built with React, TypeScript, and Socket.io infrastructure for future peer-to-peer features.
 
-> 🚧 **Roadmap**: Currently migrating to full WebRTC peer-to-peer data synchronization for truly decentralized score tracking.
+> 🚧 **Roadmap**:
+>
+> - Removing WebRTC to use onlySocket.io for all synchronization.
+> - Add optional Redis persistence for rooms.
 
 🎮 **[Try it now at skore.manach.dev](https://skore.manach.dev)**
 
