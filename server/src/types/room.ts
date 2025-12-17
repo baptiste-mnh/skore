@@ -11,4 +11,5 @@ export interface Room {
   id: string;
   players: Player[];
   hostId: string;
+  passwordHash: string | null; // null = public room, string = bcrypt hash for private room
 }

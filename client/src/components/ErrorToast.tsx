@@ -19,8 +19,8 @@ export const ErrorToast = ({
   }, [duration, onClose]);
 
   return (
-    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 max-w-md w-full mx-4 animate-scale-up">
-      <div className="bg-gold/10 border border-gold rounded-xl p-4 shadow-md flex items-center gap-3">
+    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-9999 max-w-md w-full mx-4 animate-scale-up">
+      <div className="bg-white/80 backdrop-blur-md border border-gold rounded-xl p-4 shadow-md flex items-center gap-3">
         <div className="shrink-0 w-6 h-6 bg-gold rounded-full flex items-center justify-center">
           <X size={14} className="text-white" />
         </div>

@@ -38,8 +38,24 @@ export const PrivacyPolicy = () => {
             How Data is Stored
           </h2>
           <p className="text-slate-700 mb-3">
-            All game data is stored temporarily in our database (Redis).
+            All game data is stored temporarily using Keyv with Redis backend (in production) or in-memory storage (in development).
           </p>
+          <div className="bg-slate-50 p-4 rounded-lg mb-3">
+            <p className="text-sm text-slate-600 mb-2">
+              <strong>What we store:</strong>
+            </p>
+            <ul className="list-disc ml-6 space-y-1 text-sm text-slate-600">
+              <li>
+                <strong>Room data:</strong> Player names, avatars, scores, room codes, and password hashes (for private rooms)
+              </li>
+              <li>
+                <strong>Socket mappings:</strong> Temporary connection IDs to enable reconnection after page refresh
+              </li>
+              <li>
+                <strong>Access tokens:</strong> HMAC-SHA256 tokens for password-protected rooms (stateless, no session storage)
+              </li>
+            </ul>
+          </div>
           <ul className="list-disc ml-6 space-y-2 text-slate-700">
             <li>
               Data is <strong>not</strong> linked to any personal account or
@@ -49,6 +65,9 @@ export const PrivacyPolicy = () => {
               Data is <strong>not</strong> shared with third parties
             </li>
             <li>No cookies are used for tracking purposes</li>
+            <li>
+              All sensitive data (passwords) is hashed using bcrypt before storage
+            </li>
           </ul>
         </section>
 
@@ -57,26 +76,59 @@ export const PrivacyPolicy = () => {
             Automatic Data Deletion
           </h2>
           <div className="bg-gold/10 p-4 rounded-lg border border-gold/20 mb-3">
-            <p className="font-semibold text-prussian">
-              All room data is automatically deleted after 1 hour of inactivity.
+            <p className="font-semibold text-prussian mb-2">
+              All data is automatically deleted based on activity:
             </p>
+            <ul className="list-disc ml-6 space-y-1 text-sm text-prussian">
+              <li>
+                <strong>Room data:</strong> Deleted after 1 hour of inactivity
+              </li>
+              <li>
+                <strong>Socket mappings:</strong> Deleted after 24 hours or immediately upon disconnect
+              </li>
+            </ul>
           </div>
-          <p className="text-slate-700">
+          <p className="text-slate-700 mb-3">
             Every interaction (score update, player join, name change, etc.)
-            resets the 1-hour timer. If no activity occurs in a room for 1 hour,
+            resets the 1-hour timer for room data. If no activity occurs in a room for 1 hour,
             all data associated with that room is permanently and automatically
             deleted from our servers.
+          </p>
+          <p className="text-slate-700">
+            Connection tracking data (socket mappings) is cleaned up immediately when you disconnect,
+            with a 24-hour safety TTL to prevent any data leaks if cleanup fails.
           </p>
         </section>
 
         <section className="mb-8">
           <h2 className="text-xl font-semibold text-prussian mb-3">
-            Local Storage
+            Local Storage (Your Device Only)
           </h2>
-          <p className="text-slate-700">
-            Skore uses browser localStorage to remember your player ID for
-            reconnection purposes. This data stays on your device and can be
-            cleared by clearing your browser data.
+          <p className="text-slate-700 mb-3">
+            Skore uses browser localStorage to enable automatic reconnection when you refresh the page.
+            This data stays <strong>only on your device</strong> and is never sent to our servers except when reconnecting.
+          </p>
+          <div className="bg-slate-50 p-4 rounded-lg">
+            <p className="text-sm text-slate-600 mb-2">
+              <strong>What's stored in your browser:</strong>
+            </p>
+            <ul className="list-disc ml-6 space-y-1 text-sm text-slate-600">
+              <li>
+                <strong>Player ID per room:</strong> <code className="bg-white px-1 py-0.5 rounded">skore_user_[ROOMID]</code> - Your socket ID for reconnection
+              </li>
+              <li>
+                <strong>Access tokens:</strong> <code className="bg-white px-1 py-0.5 rounded">skore_access_token_[ROOMID]</code> - For password-protected rooms
+              </li>
+              <li>
+                <strong>Your name:</strong> <code className="bg-white px-1 py-0.5 rounded">skore_name</code> - The last name you used
+              </li>
+              <li>
+                <strong>Recent rooms:</strong> <code className="bg-white px-1 py-0.5 rounded">skore_recent_rooms</code> - List of your 3 most recent room codes
+              </li>
+            </ul>
+          </div>
+          <p className="text-slate-700 mt-3 text-sm">
+            You can clear this data at any time by clearing your browser's local storage or site data.
           </p>
         </section>
 

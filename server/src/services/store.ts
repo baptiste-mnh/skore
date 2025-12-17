@@ -5,13 +5,20 @@ import type { Room } from "../types/room";
 // In-memory if KEYV_URI empty, Redis if URL provided
 const KEYV_URI = process.env.KEYV_URI;
 const ROOM_TTL = parseInt(process.env.ROOM_TTL_MS || "3600000"); // 1 hour in ms
+export const SOCKET_TTL = 24 * 60 * 60 * 1000; // 24 hours in ms (safety cleanup)
 
 // If URI is provided, use Redis adapter; otherwise Keyv defaults to in-memory Map
 export const store = KEYV_URI
   ? new Keyv({ store: new KeyvRedis(KEYV_URI), namespace: "room" })
   : new Keyv({ namespace: "room" });
 
+// Socket-to-room mapping store (to track which room a socket is in)
+export const socketStore = KEYV_URI
+  ? new Keyv({ store: new KeyvRedis(KEYV_URI), namespace: "socket" })
+  : new Keyv({ namespace: "socket" });
+
 store.on("error", (err) => console.error("Store Error:", err));
+socketStore.on("error", (err) => console.error("Socket Store Error:", err));
 
 console.log(`✅ Store initialized: ${KEYV_URI ? "Redis" : "In-memory"}`);
 

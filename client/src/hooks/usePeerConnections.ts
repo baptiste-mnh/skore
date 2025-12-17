@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useGame } from "./useGame";
 
-export const useP2P = () => {
+export const usePeerConnections = () => {
   const { socket } = useGame();
   const peersRef = useRef<{ [key: string]: RTCPeerConnection }>({});
 

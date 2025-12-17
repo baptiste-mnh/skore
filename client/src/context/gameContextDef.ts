@@ -17,11 +17,27 @@ export interface GameState {
   currentPlayer: Player | null;
 }
 
+export interface RoomStatus {
+  players: Player[];
+  isPrivate?: boolean;
+}
+
 export interface GameContextType {
   gameState: GameState;
-  createRoom: (name: string, avatar: string) => void;
-  joinRoom: (roomId: string, name: string, avatar: string) => void;
-  rejoinRoom: (roomId: string, oldPlayerId: string) => void;
+  createRoom: (name: string, avatar: string, password?: string) => void;
+  joinRoom: (
+    roomId: string,
+    name: string,
+    avatar: string,
+    password?: string,
+    accessToken?: string
+  ) => void;
+  rejoinRoom: (
+    roomId: string,
+    oldPlayerId: string,
+    password?: string,
+    accessToken?: string
+  ) => void;
   checkRoom: (roomId: string) => void;
   updateScore: (playerId: string, delta: number) => void;
   updatePlayerName: (roomId: string, newName: string, avatar: string) => void;
@@ -30,7 +46,7 @@ export interface GameContextType {
   addOfflinePlayer: (roomId: string, name: string, avatar: string) => void;
   socket: Socket | null;
   isConnected: boolean;
-  roomStatus: Player[] | null;
+  roomStatus: RoomStatus | null;
   clearRoomStatus: () => void;
   error: string | null;
   clearError: () => void;

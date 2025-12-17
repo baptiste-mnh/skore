@@ -1,9 +1,19 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { io, Socket } from "socket.io-client";
-import { GameContext, type GameState, type Player } from "./gameContextDef";
+import {
+  GameContext,
+  type GameState,
+  type Player,
+  type RoomStatus,
+} from "./gameContextDef";
 
 // Re-export types for convenience
-export type { Player, GameState, GameContextType } from "./gameContextDef";
+export type {
+  Player,
+  GameState,
+  GameContextType,
+  RoomStatus,
+} from "./gameContextDef";
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:4000";
 
@@ -12,7 +22,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({
 }) => {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
-  const [roomStatus, setRoomStatus] = useState<Player[] | null>(null);
+  const [roomStatus, setRoomStatus] = useState<RoomStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [gameState, setGameState] = useState<GameState>({
     players: [],
@@ -23,7 +33,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({
 
   // Initialize socket connection once
   useEffect(() => {
-    console.log("🔌 Creating socket connection to:", SERVER_URL);
+    console.debug("🔌 Creating socket connection to:", SERVER_URL);
 
     const socketInstance = io(SERVER_URL, {
       transports: ["websocket", "polling"],
@@ -34,12 +44,12 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({
 
     // Connection handlers
     socketInstance.on("connect", () => {
-      console.log("✅ Socket connected:", socketInstance.id);
+      console.debug("✅ Socket connected:", socketInstance.id);
       setIsConnected(true);
     });
 
     socketInstance.on("disconnect", () => {
-      console.log("❌ Socket disconnected");
+      console.debug("❌ Socket disconnected");
       setIsConnected(false);
     });
 
@@ -49,7 +59,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({
 
     // App error handler
     socketInstance.on("app_error", ({ message }: { message: string }) => {
-      console.log("🔴 app_error received:", message);
+      console.debug("🔴 app_error received:", message);
       setError(message);
     });
 
@@ -57,7 +67,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({
 
     // Cleanup on unmount
     return () => {
-      console.log("🔌 Disconnecting socket");
+      console.debug("🔌 Disconnecting socket");
       socketInstance.disconnect();
     };
   }, []);
@@ -68,31 +78,71 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({
 
     socket.on(
       "room_created",
-      ({ roomId, player }: { roomId: string; player: Player }) => {
+      ({
+        roomId,
+        player,
+        accessToken,
+        isPrivate,
+      }: {
+        roomId: string;
+        player: Player;
+        accessToken?: string;
+        isPrivate?: boolean;
+      }) => {
+        // Store access token if private room
+        if (accessToken) {
+          localStorage.setItem(`skore_access_token_${roomId}`, accessToken);
+        }
+
         setGameState((prev) => ({
           ...prev,
           roomId,
           players: [player],
           currentPlayer: player,
-          logs: [...prev.logs, `Room created by ${player.name}`],
+          logs: [
+            ...prev.logs,
+            `Room created by ${player.name}${isPrivate ? " (private)" : ""}`,
+          ],
         }));
       }
     );
 
-    socket.on("room_status", ({ players }: { players: Player[] }) => {
-      setRoomStatus(players);
-    });
+    socket.on(
+      "room_status",
+      ({ players, isPrivate }: { players: Player[]; isPrivate?: boolean }) => {
+        setRoomStatus({ players, isPrivate });
+      }
+    );
 
     socket.on(
       "room_joined",
-      ({ roomId, players }: { roomId: string; players: Player[] }) => {
+      ({
+        roomId,
+        players,
+        accessToken,
+        isPrivate,
+      }: {
+        roomId: string;
+        players: Player[];
+        accessToken?: string;
+        isPrivate?: boolean;
+      }) => {
         const me = players.find((p: Player) => p.id === socket.id);
+
+        // Store access token if private room
+        if (accessToken) {
+          localStorage.setItem(`skore_access_token_${roomId}`, accessToken);
+        }
+
         setGameState((prev) => ({
           ...prev,
           roomId,
           players,
           currentPlayer: me || null,
-          logs: [...prev.logs, `Joined room ${roomId}`],
+          logs: [
+            ...prev.logs,
+            `Joined room ${roomId}${isPrivate ? " (private)" : ""}`,
+          ],
         }));
       }
     );
@@ -150,13 +200,19 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({
 
     socket.on("host_migrated", ({ newHostId }: { newHostId: string }) => {
       setGameState((prev) => {
-        const updatedPlayers = prev.players.map((p) =>
-          p.id === newHostId ? { ...p, isHost: true } : p
+        const updatedPlayers = prev.players.map(
+          (p) =>
+            p.id === newHostId
+              ? { ...p, isHost: true } // New host
+              : { ...p, isHost: false } // Remove host from all others
         );
 
         let updatedCurrentPlayer = prev.currentPlayer;
-        if (updatedCurrentPlayer && updatedCurrentPlayer.id === newHostId) {
-          updatedCurrentPlayer = { ...updatedCurrentPlayer, isHost: true };
+        if (updatedCurrentPlayer) {
+          updatedCurrentPlayer = {
+            ...updatedCurrentPlayer,
+            isHost: updatedCurrentPlayer.id === newHostId,
+          };
         }
 
         if (updatedCurrentPlayer && updatedCurrentPlayer.id === socket.id) {
@@ -245,13 +301,17 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({
     };
   }, [socket]);
 
-  const createRoom = (name: string, avatar: string) => {
+  const createRoom = (name: string, avatar: string, password?: string) => {
     if (!socket || !isConnected) {
       console.error("❌ Cannot create room: socket not connected");
       return;
     }
-    console.log("📤 Emitting create_room", { playerName: name, avatar });
-    socket.emit("create_room", { playerName: name, avatar });
+    console.debug("📤 Emitting create_room", {
+      playerName: name,
+      avatar,
+      hasPassword: !!password,
+    });
+    socket.emit("create_room", { playerName: name, avatar, password });
   };
 
   const checkRoom = (roomId: string) => {
@@ -262,20 +322,37 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({
     socket.emit("check_room", { roomId });
   };
 
-  const joinRoom = (roomId: string, name: string, avatar: string) => {
+  const joinRoom = (
+    roomId: string,
+    name: string,
+    avatar: string,
+    password?: string,
+    accessToken?: string
+  ) => {
     if (!socket || !isConnected) {
       console.error("❌ Cannot join room: socket not connected");
       return;
     }
-    socket.emit("join_room", { roomId, playerName: name, avatar });
+    socket.emit("join_room", {
+      roomId,
+      playerName: name,
+      avatar,
+      password,
+      accessToken,
+    });
   };
 
-  const rejoinRoom = (roomId: string, oldPlayerId: string) => {
+  const rejoinRoom = (
+    roomId: string,
+    oldPlayerId: string,
+    password?: string,
+    accessToken?: string
+  ) => {
     if (!socket || !isConnected) {
       console.error("❌ Cannot rejoin room: socket not connected");
       return;
     }
-    socket.emit("rejoin_room", { roomId, oldPlayerId });
+    socket.emit("rejoin_room", { roomId, oldPlayerId, password, accessToken });
   };
 
   const updateScore = (playerId: string, delta: number) => {

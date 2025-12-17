@@ -1,16 +1,10 @@
-import {
-  Github,
-  LogOut,
-  RefreshCw,
-  Share2,
-  UserPlus,
-  Trophy,
-} from "lucide-react";
+import { LogOut, RefreshCw, Share2, UserPlus, Trophy } from "lucide-react";
+import { SiGithub } from "react-icons/si";
 import { useEffect, useState } from "react";
 import QRCode from "react-qr-code";
 import type { Player } from "./context/GameContext";
 import { useGame } from "./hooks/useGame";
-import { useP2P } from "./hooks/useP2P";
+import { usePeerConnections } from "./hooks/usePeerConnections";
 import AlertModal from "./components/AlertModal";
 import ConfirmModal from "./components/ConfirmModal";
 import AddOfflinePlayerModal from "./components/AddOfflinePlayerModal";
@@ -25,6 +19,7 @@ import PlayerCard from "./components/PlayerCard";
 import SocketStatus from "./components/SocketStatus";
 import Logo from "./components/Logo";
 import { PrivacyPolicy } from "./pages/PrivacyPolicy";
+import PasswordPromptModal from "./components/PasswordPromptModal";
 
 function App() {
   const {
@@ -45,13 +40,22 @@ function App() {
     socket,
     isConnected,
   } = useGame();
-  useP2P(); // Initialize P2P listeners
+  usePeerConnections(); // Initialize P2P listeners
 
   const [inputName, setInputName] = useState(
     () => localStorage.getItem("skore_name") || ""
   );
   const [inputRoomId, setInputRoomId] = useState("");
   const [view, setView] = useState<"lobby" | "game">("lobby");
+
+  // Password-protected rooms
+  const [isPrivateRoom, setIsPrivateRoom] = useState(false);
+  const [createRoomPassword, setCreateRoomPassword] = useState("");
+  const [passwordPromptOpen, setPasswordPromptOpen] = useState(false);
+  const [pendingJoinAction, setPendingJoinAction] = useState<{
+    roomId: string;
+    takeControlOfPlayerId?: string;
+  } | null>(null);
 
   // Numpad State
   const [numpadOpen, setNumpadOpen] = useState(false);
@@ -161,17 +165,46 @@ function App() {
       : animalMap[defaultName.animal];
     localStorage.setItem("skore_name", name);
 
+    // Get access token from localStorage
+    const accessToken =
+      localStorage.getItem(`skore_access_token_${inputRoomId}`) || undefined;
+
     if (takeControlOfPlayerId) {
       // Take control of offline player
-      rejoinRoom(inputRoomId, takeControlOfPlayerId);
+      rejoinRoom(inputRoomId, takeControlOfPlayerId, undefined, accessToken);
       localStorage.setItem(`skore_user_${inputRoomId}`, takeControlOfPlayerId);
     } else {
       // Create new player
-      joinRoom(inputRoomId, name, avatar);
+      joinRoom(inputRoomId, name, avatar, undefined, accessToken);
     }
 
     setShowTakeControlModal(false);
     setAvailableOfflinePlayers([]);
+  };
+
+  const handlePasswordSubmit = (password: string) => {
+    const name = inputName || `${defaultName.adjective} ${defaultName.animal}`;
+    const avatar = inputName
+      ? getRandomAvatar()
+      : animalMap[defaultName.animal];
+    localStorage.setItem("skore_name", name);
+
+    if (pendingJoinAction?.takeControlOfPlayerId) {
+      rejoinRoom(
+        inputRoomId,
+        pendingJoinAction.takeControlOfPlayerId,
+        password
+      );
+      localStorage.setItem(
+        `skore_user_${inputRoomId}`,
+        pendingJoinAction.takeControlOfPlayerId
+      );
+    } else {
+      joinRoom(inputRoomId, name, avatar, password);
+    }
+
+    setPasswordPromptOpen(false);
+    setPendingJoinAction(null);
   };
 
   const handleProfileUpdate = (name: string, avatar: string) => {
@@ -255,6 +288,20 @@ function App() {
     }
   }, []);
 
+  // Auto-reconnect when page loads with room URL (only if user was previously in this room)
+  useEffect(() => {
+    if (hasRoomInUrl && inputRoomId && isConnected && !gameState.roomId) {
+      const savedUserId = localStorage.getItem(`skore_user_${inputRoomId}`);
+
+      // Only auto-reconnect if we have a saved user ID (returning user)
+      // New users should see the name input form first
+      if (savedUserId) {
+        console.debug("🔄 Auto-reconnecting to room:", inputRoomId);
+        checkRoom(inputRoomId);
+      }
+    }
+  }, [hasRoomInUrl, inputRoomId, isConnected, gameState.roomId]);
+
   useEffect(() => {
     if (gameState.roomId) {
       setView("game");
@@ -284,38 +331,56 @@ function App() {
   // Handle room status for offline player selection
   useEffect(() => {
     if (roomStatus) {
-      console.log("🔍 roomStatus received:", roomStatus);
-      console.log("🔍 inputRoomId:", inputRoomId);
+      console.debug("🔍 roomStatus received:", roomStatus);
+      console.debug("🔍 inputRoomId:", inputRoomId);
 
       const savedUserId = localStorage.getItem(`skore_user_${inputRoomId}`);
-      console.log("🔍 savedUserId:", savedUserId);
+      const accessToken =
+        localStorage.getItem(`skore_access_token_${inputRoomId}`) || undefined;
+      console.debug("🔍 savedUserId:", savedUserId);
+      console.debug("🔍 hasAccessToken:", !!accessToken);
 
-      // Check if saved user ID exists and is offline
+      // If private room and no access token, prompt for password
+      if (roomStatus.isPrivate && !accessToken) {
+        console.debug("🔍 Private room without token, showing password prompt");
+        setPendingJoinAction({
+          roomId: inputRoomId,
+          takeControlOfPlayerId: savedUserId || undefined,
+        });
+        setPasswordPromptOpen(true);
+        clearRoomStatus();
+        return;
+      }
+
+      // Check if saved user ID exists (reconnection scenario)
       if (savedUserId) {
-        const savedPlayer = roomStatus.find((p) => p.id === savedUserId);
-        console.log("🔍 savedPlayer:", savedPlayer);
+        const savedPlayer = roomStatus.players.find(
+          (p) => p.id === savedUserId
+        );
+        console.debug("🔍 savedPlayer:", savedPlayer);
 
-        // If saved player exists and is offline, rejoin directly
-        if (savedPlayer && !savedPlayer.isOnline) {
-          console.log("🔍 Rejoining with saved player");
-          rejoinRoom(inputRoomId, savedUserId);
+        // If saved player exists in room, always try to rejoin (regardless of online status)
+        // This handles page refresh where the player might still appear online
+        if (savedPlayer) {
+          console.debug("🔍 Rejoining with saved player (auto-reconnect)");
+          rejoinRoom(inputRoomId, savedUserId, undefined, accessToken);
           clearRoomStatus();
           return;
         }
 
-        // If saved player doesn't exist or is online, continue with offline player selection
+        // If saved player doesn't exist in room anymore, continue with normal join flow
       }
 
       // Filter offline players
-      const offlinePlayers = roomStatus.filter((p) => !p.isOnline);
-      console.log("🔍 offlinePlayers:", offlinePlayers);
+      const offlinePlayers = roomStatus.players.filter((p) => !p.isOnline);
+      console.debug("🔍 offlinePlayers:", offlinePlayers);
 
       if (offlinePlayers.length > 0) {
-        console.log("🔍 Showing TakeControlModal");
+        console.debug("🔍 Showing TakeControlModal");
         setAvailableOfflinePlayers(offlinePlayers);
         setShowTakeControlModal(true);
       } else {
-        console.log("🔍 No offline players, proceeding with join");
+        console.debug("🔍 No offline players, proceeding with join");
         proceedWithJoin();
       }
 
@@ -386,7 +451,7 @@ function App() {
                 rel="noopener noreferrer"
                 className="hover:text-slate-600 transition-colors"
               >
-                <Github size={16} />
+                <SiGithub size={16} />
               </a>
               <span>•</span>
               <a
@@ -430,6 +495,17 @@ function App() {
             onCreateNew={() => proceedWithJoin()}
           />
 
+          {/* PasswordPromptModal for private rooms */}
+          <PasswordPromptModal
+            isOpen={passwordPromptOpen}
+            onClose={() => {
+              setPasswordPromptOpen(false);
+              setPendingJoinAction(null);
+            }}
+            onSubmit={handlePasswordSubmit}
+            roomId={inputRoomId}
+          />
+
           {/* Error Toast */}
           {error && (
             <ErrorToast message={error} onClose={clearError} duration={5000} />
@@ -448,12 +524,71 @@ function App() {
           </p>
 
           <div className="w-full space-y-4">
+            {/* Private Room Toggle */}
+            <div className="flex items-center gap-2 p-3 bg-alabaster rounded-xl">
+              <input
+                type="checkbox"
+                id="private-room"
+                checked={isPrivateRoom}
+                onChange={(e) => setIsPrivateRoom(e.target.checked)}
+                className="w-4 h-4 text-gold focus:ring-gold rounded cursor-pointer"
+              />
+              <label
+                htmlFor="private-room"
+                className="text-sm text-prussian cursor-pointer select-none"
+              >
+                Private Room (password protected)
+              </label>
+            </div>
+
+            {/* Password Input (shown if private room selected) */}
+            {isPrivateRoom && (
+              <div>
+                <label className="block text-sm font-medium text-prussian mb-1">
+                  Room Password
+                </label>
+                <input
+                  type="password"
+                  value={createRoomPassword}
+                  onChange={(e) => setCreateRoomPassword(e.target.value)}
+                  placeholder="Enter password (4-20 characters)"
+                  className="w-full p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-gold focus:border-transparent outline-none transition-all"
+                  minLength={4}
+                  maxLength={20}
+                  autoFocus
+                />
+              </div>
+            )}
+
             <button
               onClick={() => {
                 const name = inputName || generateName();
                 const avatar = getRandomAvatar();
                 localStorage.setItem("skore_name", name);
-                createRoom(name, avatar);
+
+                // Validate password if private room
+                if (isPrivateRoom) {
+                  if (!createRoomPassword || createRoomPassword.length < 4) {
+                    showAlert(
+                      "Password must be at least 4 characters",
+                      "Invalid Password"
+                    );
+                    return;
+                  }
+                  if (createRoomPassword.length > 20) {
+                    showAlert(
+                      "Password must be 20 characters or less",
+                      "Invalid Password"
+                    );
+                    return;
+                  }
+                }
+
+                createRoom(
+                  name,
+                  avatar,
+                  isPrivateRoom ? createRoomPassword : undefined
+                );
               }}
               className="w-full py-4 bg-gold text-white rounded-xl font-bold shadow-lg shadow-gold/20 active:scale-95 transition-transform"
             >
@@ -524,7 +659,7 @@ function App() {
               rel="noopener noreferrer"
               className="hover:text-slate-600 transition-colors"
             >
-              <Github size={16} />
+              <SiGithub size={16} />
             </a>
             <span>•</span>
             <a
@@ -568,6 +703,17 @@ function App() {
           onCreateNew={() => proceedWithJoin()}
         />
 
+        {/* PasswordPromptModal for private rooms */}
+        <PasswordPromptModal
+          isOpen={passwordPromptOpen}
+          onClose={() => {
+            setPasswordPromptOpen(false);
+            setPendingJoinAction(null);
+          }}
+          onSubmit={handlePasswordSubmit}
+          roomId={inputRoomId}
+        />
+
         {/* Error Toast */}
         {error && (
           <ErrorToast message={error} onClose={clearError} duration={5000} />
@@ -580,7 +726,7 @@ function App() {
     return (
       <div className="min-h-screen bg-white pb-20">
         {/* Header */}
-        <div className="bg-white border-b border-alabaster p-4 sticky top-0 z-10 shadow-sm">
+        <div className="bg-white border-b border-alabaster p-4 sticky top-0 z-30 shadow-sm">
           <div className="flex items-center justify-between max-w-md mx-auto">
             {/* Logo (Top Left) */}
             <Logo className="text-xl text-gold" />
@@ -608,7 +754,9 @@ function App() {
                 onClick={() => {
                   showConfirm(
                     "Are you sure you want to exit this room?",
-                    () => location.reload(),
+                    () => {
+                      window.location.href = "/";
+                    },
                     {
                       title: "Exit Room",
                       confirmText: "Exit",
@@ -690,7 +838,7 @@ function App() {
         )}
 
         {/* Players */}
-        <div className="p-4 space-y-3 max-w-md mx-auto">
+        <div className="relative z-20 p-4 space-y-3 max-w-md mx-auto">
           {gameState.players.map((player) => (
             <PlayerCard
               key={player.id}
@@ -706,7 +854,7 @@ function App() {
         </div>
 
         {/* Logs (Simple) */}
-        <div className="fixed bottom-0 left-0 right-0 from-white via-white to-transparent p-4 pointer-events-none h-32 flex flex-col items-center justify-end">
+        <div className="fixed bottom-0 left-0 right-0 from-white via-white to-transparent p-4 pointer-events-none h-32 flex flex-col items-center justify-end z-0">
           <div className="max-w-md mx-auto w-full">
             <div className="text-xs text-slate-400 text-center py-2 animate-pulse">
               {gameState.logs.length > 0
@@ -725,7 +873,7 @@ function App() {
                 rel="noopener noreferrer"
                 className="hover:text-slate-600 transition-colors"
               >
-                <Github size={14} />
+                <SiGithub size={14} />
               </a>
               <span>•</span>
               <a
@@ -735,6 +883,13 @@ function App() {
                 className="hover:text-slate-600 transition-colors"
               >
                 MIT
+              </a>
+              <span>•</span>
+              <a
+                href="/privacy"
+                className="hover:text-slate-600 transition-colors"
+              >
+                Privacy Policy
               </a>
             </div>
           </div>
@@ -816,6 +971,17 @@ function App() {
           offlinePlayers={availableOfflinePlayers}
           onTakeControl={(playerId) => proceedWithJoin(playerId)}
           onCreateNew={() => proceedWithJoin()}
+        />
+
+        {/* PasswordPromptModal for private rooms */}
+        <PasswordPromptModal
+          isOpen={passwordPromptOpen}
+          onClose={() => {
+            setPasswordPromptOpen(false);
+            setPendingJoinAction(null);
+          }}
+          onSubmit={handlePasswordSubmit}
+          roomId={inputRoomId}
         />
 
         {/* Error Toast */}

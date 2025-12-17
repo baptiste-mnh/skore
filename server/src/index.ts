@@ -9,8 +9,50 @@ import express from "express";
 import cors from "cors";
 import path from "path";
 import rateLimit from "express-rate-limit";
-import { createRoom, getRoom, updateRoom, deleteRoom } from "./services/store";
+import { createRoom, getRoom, updateRoom, deleteRoom, socketStore, SOCKET_TTL } from "./services/store";
 import type { Room, Player } from "./types/room";
+import bcrypt from "bcrypt";
+import {
+  generateAccessToken,
+  validateAccessToken,
+} from "./services/tokenService";
+import {
+  isPasswordAttemptRateLimited,
+  recordFailedPasswordAttempt,
+  clearPasswordAttempts,
+} from "./services/passwordRateLimit";
+
+// --- Production Environment Validation ---
+const isProduction = process.env.NODE_ENV === "production";
+
+if (isProduction) {
+  // Validate TOKEN_SECRET
+  if (
+    !process.env.TOKEN_SECRET ||
+    process.env.TOKEN_SECRET === "change-this-to-a-random-secret-in-production"
+  ) {
+    console.error(
+      "🔴 FATAL: TOKEN_SECRET must be set to a secure random value in production!"
+    );
+    console.error("   Generate one with: openssl rand -base64 32");
+    process.exit(1);
+  }
+
+  // Validate KEYV_URI (Redis required in production)
+  if (!process.env.KEYV_URI) {
+    console.error(
+      "🔴 FATAL: KEYV_URI must be set in production (Redis required for persistence)!"
+    );
+    console.error(
+      "   Example: KEYV_URI=redis://username:password@host:6379"
+    );
+    process.exit(1);
+  }
+
+  console.log("✅ Production environment validation passed");
+} else {
+  console.log("🔧 Running in development mode");
+}
 
 // --- Security Configuration ---
 const allowedOriginsEnv = process.env.ALLOWED_ORIGINS;
@@ -124,40 +166,77 @@ io.on("connection", (socket) => {
     next();
   });
 
-  socket.on("create_room", async (data: { playerName: string; avatar: string }) => {
-    // Input Sanitization
-    const cleanName = (data.playerName || "Player").substring(
-      0,
-      MAX_NAME_LENGTH
-    );
+  socket.on(
+    "create_room",
+    async (data: { playerName: string; avatar: string; password?: string }) => {
+      // Input Sanitization
+      const cleanName = (data.playerName || "Player").substring(
+        0,
+        MAX_NAME_LENGTH
+      );
 
-    const roomId = Math.random().toString(36).substring(2, 8).toUpperCase();
-    const newPlayer: Player = {
-      id: socket.id,
-      name: cleanName,
-      score: 0,
-      avatar: data.avatar,
-      isHost: true,
-      isOnline: true,
-    };
+      // Validate password if provided
+      let passwordHash: string | null = null;
+      if (data.password) {
+        if (data.password.length < 4 || data.password.length > 20) {
+          socket.emit("app_error", {
+            message: "Password must be between 4 and 20 characters",
+          });
+          return;
+        }
+        // Hash password with bcrypt (cost factor 10)
+        passwordHash = await bcrypt.hash(data.password, 10);
+      }
 
-    const room: Room = {
-      id: roomId,
-      players: [newPlayer],
-      hostId: socket.id,
-    };
+      const roomId = Math.random().toString(36).substring(2, 8).toUpperCase();
+      const newPlayer: Player = {
+        id: socket.id,
+        name: cleanName,
+        score: 0,
+        avatar: data.avatar,
+        isHost: true,
+        isOnline: true,
+      };
 
-    await createRoom(roomId, room);
+      const room: Room = {
+        id: roomId,
+        players: [newPlayer],
+        hostId: socket.id,
+        passwordHash,
+      };
 
-    socket.join(roomId);
-    socket.emit("room_created", { roomId, player: newPlayer });
-    console.log(`Room created: ${roomId} by ${cleanName}`);
-  });
+      await createRoom(roomId, room);
+
+      // Generate access token if private room
+      const accessToken = passwordHash
+        ? generateAccessToken(roomId, socket.id)
+        : null;
+
+      socket.join(roomId);
+
+      // Track socket-to-room mapping for disconnect handler (24h TTL safety)
+      await socketStore.set(socket.id, roomId, SOCKET_TTL);
+
+      socket.emit("room_created", {
+        roomId,
+        player: newPlayer,
+        accessToken,
+        isPrivate: passwordHash !== null,
+      });
+
+      console.log(
+        `Room created: ${roomId} by ${cleanName} (${passwordHash ? "private" : "public"})`
+      );
+    }
+  );
 
   socket.on("check_room", async (data: { roomId: string }) => {
     const room = await getRoom(data.roomId);
     if (room) {
-      socket.emit("room_status", { players: room.players });
+      socket.emit("room_status", {
+        players: room.players,
+        isPrivate: room.passwordHash !== null,
+      });
     } else {
       console.log("🚀 ~ check_room ~ emit app_error");
       socket.emit("app_error", { message: "Room not found" });
@@ -167,45 +246,121 @@ io.on("connection", (socket) => {
 
   socket.on(
     "join_room",
-    async (data: { roomId: string; playerName: string; avatar: string }) => {
-      const { roomId, playerName, avatar } = data;
+    async (data: {
+      roomId: string;
+      playerName: string;
+      avatar: string;
+      password?: string;
+      accessToken?: string;
+    }) => {
+      const { roomId, playerName, avatar, password, accessToken } = data;
       const room = await getRoom(roomId);
 
-      if (room) {
-        // Room Capacity Check
-        if (room.players.length >= MAX_PLAYERS_PER_ROOM) {
-          socket.emit("app_error", { message: "Room is full." });
+      if (!room) {
+        socket.emit("app_error", { message: "Room not found" });
+        return;
+      }
+
+      // Password verification for private rooms
+      if (room.passwordHash) {
+        // Validate token size to prevent DoS
+        if (accessToken && accessToken.length > 500) {
+          socket.emit("app_error", { message: "Invalid access token" });
           return;
         }
 
-        const cleanName = (playerName || "Player").substring(
-          0,
-          MAX_NAME_LENGTH
-        );
+        let authorized = false;
 
-        const newPlayer: Player = {
-          id: socket.id,
-          name: cleanName,
-          score: 0,
-          avatar,
-          isHost: false,
-          isOnline: true,
-        };
+        // Try access token first
+        if (accessToken) {
+          const tokenPlayerId = validateAccessToken(accessToken, roomId);
+          if (tokenPlayerId) {
+            authorized = true;
+          }
+        }
 
-        room.players.push(newPlayer);
-        await updateRoom(roomId, room);
+        // Try password if no valid token
+        if (!authorized && password) {
+          // Rate limit check
+          if (
+            await isPasswordAttemptRateLimited(
+              socket.handshake.address || "unknown",
+              roomId
+            )
+          ) {
+            socket.emit("app_error", {
+              message: "Too many failed password attempts. Try again later.",
+            });
+            return;
+          }
 
-        socket.join(roomId);
+          const passwordMatch = await bcrypt.compare(password, room.passwordHash);
+          if (passwordMatch) {
+            authorized = true;
+            await clearPasswordAttempts(
+              socket.handshake.address || "unknown",
+              roomId
+            );
+          } else {
+            await recordFailedPasswordAttempt(
+              socket.handshake.address || "unknown",
+              roomId
+            );
+            socket.emit("app_error", { message: "Incorrect password" });
+            return;
+          }
+        }
 
-        // Notify others
-        socket.to(roomId).emit("player_joined", newPlayer);
-
-        // Send state
-        socket.emit("room_joined", { roomId, players: room.players });
-        console.log(`User ${cleanName} joined room ${roomId}`);
-      } else {
-        socket.emit("app_error", { message: "Room not found" });
+        if (!authorized) {
+          socket.emit("app_error", { message: "Password required" });
+          return;
+        }
       }
+
+      // Room Capacity Check
+      if (room.players.length >= MAX_PLAYERS_PER_ROOM) {
+        socket.emit("app_error", { message: "Room is full." });
+        return;
+      }
+
+      const cleanName = (playerName || "Player").substring(
+        0,
+        MAX_NAME_LENGTH
+      );
+
+      const newPlayer: Player = {
+        id: socket.id,
+        name: cleanName,
+        score: 0,
+        avatar,
+        isHost: false,
+        isOnline: true,
+      };
+
+      room.players.push(newPlayer);
+      await updateRoom(roomId, room);
+
+      socket.join(roomId);
+
+      // Track socket-to-room mapping for disconnect handler (24h TTL safety)
+      await socketStore.set(socket.id, roomId, SOCKET_TTL);
+
+      // Notify others
+      socket.to(roomId).emit("player_joined", newPlayer);
+
+      // Generate access token for private rooms
+      const newAccessToken = room.passwordHash
+        ? generateAccessToken(roomId, socket.id)
+        : null;
+
+      // Send state
+      socket.emit("room_joined", {
+        roomId,
+        players: room.players,
+        accessToken: newAccessToken,
+        isPrivate: room.passwordHash !== null,
+      });
+      console.log(`User ${cleanName} joined room ${roomId}`);
     }
   );
 
@@ -270,49 +425,124 @@ io.on("connection", (socket) => {
     }
   );
 
-  socket.on("rejoin_room", async (data: { roomId: string; oldPlayerId: string }) => {
-    const { roomId, oldPlayerId } = data;
-    const room = await getRoom(roomId);
+  socket.on(
+    "rejoin_room",
+    async (data: {
+      roomId: string;
+      oldPlayerId: string;
+      password?: string;
+      accessToken?: string;
+    }) => {
+      const { roomId, oldPlayerId, password, accessToken } = data;
+      const room = await getRoom(roomId);
 
-    if (room) {
-      const playerIndex = room.players.findIndex((p) => p.id === oldPlayerId);
-      if (playerIndex !== -1) {
-        const player = room.players[playerIndex];
+      if (!room) {
+        socket.emit("app_error", { message: "Room not found" });
+        return;
+      }
 
-        // Empêcher prise de contrôle si déjà online
-        if (player.isOnline) {
-          socket.emit("app_error", {
-            message: "This player is already being controlled by someone else",
-          });
+      // Password verification for private rooms
+      if (room.passwordHash) {
+        // Validate token size to prevent DoS
+        if (accessToken && accessToken.length > 500) {
+          socket.emit("app_error", { message: "Invalid access token" });
           return;
         }
 
-        const previousId = player.id;
-        player.id = socket.id; // Update ID to new socket
-        player.isOnline = true;
+        let authorized = false;
 
-        await updateRoom(roomId, room);
+        // Try access token first (must match oldPlayerId for rejoin)
+        if (accessToken) {
+          const tokenPlayerId = validateAccessToken(accessToken, roomId);
+          if (tokenPlayerId === oldPlayerId) {
+            authorized = true;
+          }
+        }
 
-        socket.join(roomId);
+        // Try password if no valid token
+        if (!authorized && password) {
+          // Rate limit check
+          if (
+            await isPasswordAttemptRateLimited(
+              socket.handshake.address || "unknown",
+              roomId
+            )
+          ) {
+            socket.emit("app_error", {
+              message: "Too many failed password attempts. Try again later.",
+            });
+            return;
+          }
 
-        // Notify others that player is back/updated (include oldId for client-side matching)
-        socket.to(roomId).emit("player_updated", {
-          ...player,
-          oldId: previousId,
-        });
+          const passwordMatch = await bcrypt.compare(password, room.passwordHash);
+          if (passwordMatch) {
+            authorized = true;
+            await clearPasswordAttempts(
+              socket.handshake.address || "unknown",
+              roomId
+            );
+          } else {
+            await recordFailedPasswordAttempt(
+              socket.handshake.address || "unknown",
+              roomId
+            );
+            socket.emit("app_error", { message: "Incorrect password" });
+            return;
+          }
+        }
 
-        // Send full state to rejoinder
-        socket.emit("room_joined", { roomId, players: room.players });
-        console.log(
-          `User ${player.name} rejoined room ${roomId} (old: ${previousId}, new: ${socket.id})`
-        );
-      } else {
-        socket.emit("app_error", { message: "Player profile not found" });
+        if (!authorized) {
+          socket.emit("app_error", { message: "Password required" });
+          return;
+        }
       }
-    } else {
-      socket.emit("app_error", { message: "Room not found" });
+
+      const playerIndex = room.players.findIndex((p) => p.id === oldPlayerId);
+      if (playerIndex === -1) {
+        socket.emit("app_error", { message: "Player profile not found" });
+        return;
+      }
+
+      const player = room.players[playerIndex];
+
+      // Allow reconnection even if player appears online (handles page refresh)
+      // The old socket will be automatically cleaned up by disconnect handler
+      const previousId = player.id;
+      player.id = socket.id; // Update ID to new socket
+      player.isOnline = true;
+
+      await updateRoom(roomId, room);
+
+      socket.join(roomId);
+
+      // Track socket-to-room mapping for disconnect handler (24h TTL safety)
+      await socketStore.set(socket.id, roomId, SOCKET_TTL);
+      // Clean up old socket mapping (if it still exists)
+      await socketStore.delete(previousId);
+
+      // Notify others that player is back/updated (include oldId for client-side matching)
+      socket.to(roomId).emit("player_updated", {
+        ...player,
+        oldId: previousId,
+      });
+
+      // Generate new access token for private rooms
+      const newAccessToken = room.passwordHash
+        ? generateAccessToken(roomId, socket.id)
+        : null;
+
+      // Send full state to rejoinder
+      socket.emit("room_joined", {
+        roomId,
+        players: room.players,
+        accessToken: newAccessToken,
+        isPrivate: room.passwordHash !== null,
+      });
+      console.log(
+        `User ${player.name} rejoined room ${roomId} (old: ${previousId}, new: ${socket.id})`
+      );
     }
-  });
+  );
 
   socket.on(
     "update_score",
@@ -444,47 +674,65 @@ io.on("connection", (socket) => {
   });
 
   socket.on("disconnect", async () => {
-    console.log(`User disconnected: ${socket.id}`);
+    console.log(`🔌 User disconnected: ${socket.id}`);
 
-    // Use socket.rooms to find which rooms this socket is in
-    for (const roomId of socket.rooms) {
-      if (roomId === socket.id) continue; // Skip personal room
+    // Get the room ID from our tracking store (socket.rooms is empty during disconnect)
+    const roomId = await socketStore.get(socket.id);
 
-      const room = await getRoom(roomId);
-      if (!room) continue;
-
-      const player = room.players.find((p) => p.id === socket.id);
-
-      if (player) {
-        player.isOnline = false;
-
-        // Notify room that player is offline
-        io.to(roomId).emit("player_updated", player);
-
-        // Check if everyone is offline
-        const onlinePlayers = room.players.filter((p) => p.isOnline);
-
-        // Host Migration (only to online players)
-        if (player.isHost && onlinePlayers.length > 0) {
-          const newHost = onlinePlayers[0];
-          newHost.isHost = true;
-          player.isHost = false;
-          room.hostId = newHost.id;
-          io.to(roomId).emit("host_migrated", { newHostId: newHost.id });
-        }
-
-        // Update room state (resets TTL)
-        await updateRoom(roomId, room);
-
-        // No manual cleanup needed - Keyv TTL handles expiration after 1 hour
-        if (onlinePlayers.length === 0) {
-          console.log(
-            `Room ${roomId} is empty. Will auto-delete after 1 hour of inactivity.`
-          );
-        }
-        break;
-      }
+    if (!roomId) {
+      console.log(`⚠️  No room found for disconnected socket ${socket.id}`);
+      return;
     }
+
+    console.log(`🔍 Found room ${roomId} for disconnected socket ${socket.id}`);
+    const room = await getRoom(roomId);
+
+    if (!room) {
+      console.log(`⚠️  Room ${roomId} not found in store`);
+      // Clean up socket mapping
+      await socketStore.delete(socket.id);
+      return;
+    }
+
+    const player = room.players.find((p) => p.id === socket.id);
+
+    if (player) {
+      console.log(`👤 Found player ${player.name} (${player.id}) in room ${roomId}, isHost: ${player.isHost}`);
+      player.isOnline = false;
+
+      // Notify room that player is offline
+      io.to(roomId).emit("player_updated", player);
+
+      // Check if everyone is offline
+      const onlinePlayers = room.players.filter((p) => p.isOnline);
+      console.log(`📊 Online players remaining: ${onlinePlayers.length}`);
+
+      // Host Migration (only to online players)
+      if (player.isHost && onlinePlayers.length > 0) {
+        const newHost = onlinePlayers[0];
+        newHost.isHost = true;
+        player.isHost = false;
+        room.hostId = newHost.id;
+        io.to(roomId).emit("host_migrated", { newHostId: newHost.id });
+        console.log(`👑 Host migrated in room ${roomId}: ${player.name} -> ${newHost.name}`);
+      }
+
+      // Update room state (resets TTL)
+      await updateRoom(roomId, room);
+
+      // No manual cleanup needed - Keyv TTL handles expiration after 1 hour
+      if (onlinePlayers.length === 0) {
+        console.log(
+          `🏚️  Room ${roomId} is empty. Will auto-delete after 1 hour of inactivity.`
+        );
+      }
+    } else {
+      console.log(`⚠️  Socket ${socket.id} not found in room ${roomId} players list`);
+      console.log(`📋 Current players in room: ${room.players.map(p => `${p.name}(${p.id})`).join(", ")}`);
+    }
+
+    // Clean up socket-to-room mapping
+    await socketStore.delete(socket.id);
   });
 });
 
