@@ -24,6 +24,7 @@ import LeaderboardModal from "./components/LeaderboardModal";
 import PlayerCard from "./components/PlayerCard";
 import SocketStatus from "./components/SocketStatus";
 import Logo from "./components/Logo";
+import { PrivacyPolicy } from "./pages/PrivacyPolicy";
 
 function App() {
   const {
@@ -233,6 +234,9 @@ function App() {
     setConfirmOpen(true);
   };
 
+  // Check for privacy route
+  const isPrivacyRoute = window.location.pathname === "/privacy";
+
   // Simple: Check URL for room ID on mount
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -322,6 +326,11 @@ function App() {
 
   // Note: "Room not found" errors are now displayed in the ErrorToast component
 
+  // Show Privacy Policy if on /privacy route
+  if (isPrivacyRoute) {
+    return <PrivacyPolicy />;
+  }
+
   if (view === "lobby") {
     // Simple version: if room in URL, show join interface only
     if (hasRoomInUrl) {
@@ -387,6 +396,13 @@ function App() {
                 className="hover:text-slate-600 transition-colors"
               >
                 MIT License
+              </a>
+              <span>•</span>
+              <a
+                href="/privacy"
+                className="hover:text-slate-600 transition-colors"
+              >
+                Privacy Policy
               </a>
             </div>
             <p>
@@ -518,6 +534,13 @@ function App() {
               className="hover:text-slate-600 transition-colors"
             >
               MIT License
+            </a>
+            <span>•</span>
+            <a
+              href="/privacy"
+              className="hover:text-slate-600 transition-colors"
+            >
+              Privacy Policy
             </a>
           </div>
           <p>

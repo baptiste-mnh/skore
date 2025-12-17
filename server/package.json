@@ -12,10 +12,12 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@keyv/redis": "^5.1.5",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.18.2",
     "express-rate-limit": "^8.2.1",
+    "keyv": "^5.5.5",
     "socket.io": "^4.7.4"
   },
   "devDependencies": {

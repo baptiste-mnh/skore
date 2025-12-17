@@ -1,12 +1,16 @@
+import dotenv from "dotenv";
+
+// IMPORTANT: Load environment variables BEFORE any other imports
+dotenv.config();
+
 import { createServer } from "http";
 import { Server } from "socket.io";
 import express from "express";
 import cors from "cors";
-import dotenv from "dotenv";
 import path from "path";
 import rateLimit from "express-rate-limit";
-
-dotenv.config();
+import { createRoom, getRoom, updateRoom, deleteRoom } from "./services/store";
+import type { Room, Player } from "./types/room";
 
 // --- Security Configuration ---
 const allowedOriginsEnv = process.env.ALLOWED_ORIGINS;
@@ -16,11 +20,9 @@ const ALLOWED_ORIGINS = allowedOriginsEnv
 
 console.log("🔒 Allowed Origins:", ALLOWED_ORIGINS);
 
-const MAX_ROOMS = 1000; // Limit total rooms to prevent OOM
 const MAX_PLAYERS_PER_ROOM = 20; // Limit players per room
 const MAX_NAME_LENGTH = 20; // Limit player name length
 const MAX_PAYLOAD_SIZE = 10000; // 10KB max for signal payload (prevents file tunneling)
-const EMPTY_ROOM_TIMEOUT = 600000; // 10 minutes cleanup for empty rooms (was 1 hour)
 
 // --- Rate Limiting Configuration ---
 // HTTP Rate Limiter
@@ -97,37 +99,11 @@ app.get(/.*/, (req, res) => {
   res.sendFile(path.join(__dirname, "../../client/dist/index.html"));
 });
 
-interface Player {
-  id: string;
-  name: string;
-  score: number;
-  avatar: string;
-  isHost: boolean;
-  isOnline: boolean;
-}
-
-interface Room {
-  id: string;
-  players: Player[];
-  hostId: string;
-  destroyTimeout?: NodeJS.Timeout;
-}
-
-const rooms: Record<string, Room> = {};
-
 // Offline player ID generation
 let offlinePlayerCounter = 0;
 
 const generateOfflinePlayerId = (): string => {
   return `offline_${Date.now()}_${offlinePlayerCounter++}`;
-};
-
-const cleanupRoom = (roomId: string) => {
-  const room = rooms[roomId];
-  if (room && room.players.every((p) => !p.isOnline)) {
-    console.log(`Room ${roomId} deleted due to inactivity.`);
-    delete rooms[roomId];
-  }
 };
 
 io.on("connection", (socket) => {
@@ -148,16 +124,8 @@ io.on("connection", (socket) => {
     next();
   });
 
-  socket.on("create_room", (data: { playerName: string; avatar: string }) => {
-    // 1. Global Room Limit Check
-    if (Object.keys(rooms).length >= MAX_ROOMS) {
-      socket.emit("app_error", {
-        message: "Server capacity reached. Please try again later.",
-      });
-      return;
-    }
-
-    // 2. Input Sanitization
+  socket.on("create_room", async (data: { playerName: string; avatar: string }) => {
+    // Input Sanitization
     const cleanName = (data.playerName || "Player").substring(
       0,
       MAX_NAME_LENGTH
@@ -173,19 +141,21 @@ io.on("connection", (socket) => {
       isOnline: true,
     };
 
-    rooms[roomId] = {
+    const room: Room = {
       id: roomId,
       players: [newPlayer],
       hostId: socket.id,
     };
+
+    await createRoom(roomId, room);
 
     socket.join(roomId);
     socket.emit("room_created", { roomId, player: newPlayer });
     console.log(`Room created: ${roomId} by ${cleanName}`);
   });
 
-  socket.on("check_room", (data: { roomId: string }) => {
-    const room = rooms[data.roomId];
+  socket.on("check_room", async (data: { roomId: string }) => {
+    const room = await getRoom(data.roomId);
     if (room) {
       socket.emit("room_status", { players: room.players });
     } else {
@@ -197,21 +167,15 @@ io.on("connection", (socket) => {
 
   socket.on(
     "join_room",
-    (data: { roomId: string; playerName: string; avatar: string }) => {
+    async (data: { roomId: string; playerName: string; avatar: string }) => {
       const { roomId, playerName, avatar } = data;
-      const room = rooms[roomId];
+      const room = await getRoom(roomId);
 
       if (room) {
-        // 3. Room Capacity Check
+        // Room Capacity Check
         if (room.players.length >= MAX_PLAYERS_PER_ROOM) {
           socket.emit("app_error", { message: "Room is full." });
           return;
-        }
-
-        // Clear destroy timeout if someone joins
-        if (room.destroyTimeout) {
-          clearTimeout(room.destroyTimeout);
-          room.destroyTimeout = undefined;
         }
 
         const cleanName = (playerName || "Player").substring(
@@ -229,6 +193,8 @@ io.on("connection", (socket) => {
         };
 
         room.players.push(newPlayer);
+        await updateRoom(roomId, room);
+
         socket.join(roomId);
 
         // Notify others
@@ -245,9 +211,9 @@ io.on("connection", (socket) => {
 
   socket.on(
     "add_offline_player",
-    (data: { roomId: string; playerName: string; avatar: string }) => {
+    async (data: { roomId: string; playerName: string; avatar: string }) => {
       const { roomId, playerName, avatar } = data;
-      const room = rooms[roomId];
+      const room = await getRoom(roomId);
 
       if (!room) {
         socket.emit("app_error", { message: "Room not found" });
@@ -295,6 +261,8 @@ io.on("connection", (socket) => {
       };
 
       room.players.push(offlinePlayer);
+      await updateRoom(roomId, room);
+
       io.to(roomId).emit("player_joined", offlinePlayer);
       console.log(
         `Offline player ${cleanName} added to room ${roomId} by host`
@@ -302,16 +270,11 @@ io.on("connection", (socket) => {
     }
   );
 
-  socket.on("rejoin_room", (data: { roomId: string; oldPlayerId: string }) => {
+  socket.on("rejoin_room", async (data: { roomId: string; oldPlayerId: string }) => {
     const { roomId, oldPlayerId } = data;
-    const room = rooms[roomId];
+    const room = await getRoom(roomId);
 
     if (room) {
-      if (room.destroyTimeout) {
-        clearTimeout(room.destroyTimeout);
-        room.destroyTimeout = undefined;
-      }
-
       const playerIndex = room.players.findIndex((p) => p.id === oldPlayerId);
       if (playerIndex !== -1) {
         const player = room.players[playerIndex];
@@ -327,6 +290,8 @@ io.on("connection", (socket) => {
         const previousId = player.id;
         player.id = socket.id; // Update ID to new socket
         player.isOnline = true;
+
+        await updateRoom(roomId, room);
 
         socket.join(roomId);
 
@@ -351,13 +316,14 @@ io.on("connection", (socket) => {
 
   socket.on(
     "update_score",
-    (data: { roomId: string; playerId: string; newScore: number }) => {
+    async (data: { roomId: string; playerId: string; newScore: number }) => {
       const { roomId, playerId, newScore } = data;
-      const room = rooms[roomId];
+      const room = await getRoom(roomId);
       if (room) {
         const player = room.players.find((p) => p.id === playerId);
         if (player) {
           player.score = newScore;
+          await updateRoom(roomId, room);
           socket.to(roomId).emit("score_updated", { playerId, newScore });
         }
       }
@@ -366,15 +332,16 @@ io.on("connection", (socket) => {
 
   socket.on(
     "update_player_name",
-    (data: { roomId: string; newName: string; avatar: string }) => {
+    async (data: { roomId: string; newName: string; avatar: string }) => {
       const { roomId, newName, avatar } = data;
-      const room = rooms[roomId];
+      const room = await getRoom(roomId);
       if (room) {
         const player = room.players.find((p) => p.id === socket.id);
         if (player) {
           const cleanName = (newName || "Player").substring(0, MAX_NAME_LENGTH);
           player.name = cleanName;
           player.avatar = avatar;
+          await updateRoom(roomId, room);
           io.to(roomId).emit("player_name_updated", {
             playerId: socket.id,
             name: cleanName,
@@ -385,18 +352,19 @@ io.on("connection", (socket) => {
     }
   );
 
-  socket.on("reset_game", (data: { roomId: string }) => {
+  socket.on("reset_game", async (data: { roomId: string }) => {
     const { roomId } = data;
-    const room = rooms[roomId];
+    const room = await getRoom(roomId);
     if (room) {
       room.players.forEach((p) => (p.score = 0));
+      await updateRoom(roomId, room);
       io.to(roomId).emit("game_reset");
     }
   });
 
-  socket.on("remove_player", (data: { roomId: string; playerId: string }) => {
+  socket.on("remove_player", async (data: { roomId: string; playerId: string }) => {
     const { roomId, playerId } = data;
-    const room = rooms[roomId];
+    const room = await getRoom(roomId);
     if (room) {
       // Verify that the requester is the host
       const requester = room.players.find((p) => p.id === socket.id);
@@ -422,6 +390,7 @@ io.on("connection", (socket) => {
 
       // Remove the player from the room
       room.players = room.players.filter((p) => p.id !== playerId);
+      await updateRoom(roomId, room);
 
       // Notify all clients in the room
       io.to(roomId).emit("player_removed", { playerId });
@@ -433,7 +402,7 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("signal", (data) => {
+  socket.on("signal", async (data) => {
     // 4. Signal Security: Target Validation & Payload Size Check
     if (!data.target || !data.signal) return;
 
@@ -444,45 +413,53 @@ io.on("connection", (socket) => {
       return;
     }
 
-    // Find sender's room
+    // Find sender's room by checking socket rooms
     let senderRoomId: string | null = null;
-    // Optimization: In a real app, store socket.id -> roomId map to avoid O(N) scan
-    for (const rid in rooms) {
-      if (rooms[rid].players.some((p) => p.id === socket.id)) {
+    for (const rid of socket.rooms) {
+      if (rid === socket.id) continue; // Skip personal room
+      const room = await getRoom(rid);
+      if (room && room.players.some((p) => p.id === socket.id)) {
         senderRoomId = rid;
         break;
       }
     }
 
     if (senderRoomId) {
-      // Ensure target is in the SAME room
-      const targetInRoom = rooms[senderRoomId].players.some(
-        (p) => p.id === data.target
-      );
-      if (targetInRoom) {
-        io.to(data.target).emit("signal", {
-          sender: socket.id,
-          signal: data.signal,
-        });
-      } else {
-        console.warn(
-          `Blocked signal from ${socket.id} to ${data.target} (not in same room)`
-        );
+      const room = await getRoom(senderRoomId);
+      if (room) {
+        // Ensure target is in the SAME room
+        const targetInRoom = room.players.some((p) => p.id === data.target);
+        if (targetInRoom) {
+          io.to(data.target).emit("signal", {
+            sender: socket.id,
+            signal: data.signal,
+          });
+        } else {
+          console.warn(
+            `Blocked signal from ${socket.id} to ${data.target} (not in same room)`
+          );
+        }
       }
     }
   });
 
-  socket.on("disconnect", () => {
+  socket.on("disconnect", async () => {
     console.log(`User disconnected: ${socket.id}`);
-    for (const roomId in rooms) {
-      const room = rooms[roomId];
+
+    // Use socket.rooms to find which rooms this socket is in
+    for (const roomId of socket.rooms) {
+      if (roomId === socket.id) continue; // Skip personal room
+
+      const room = await getRoom(roomId);
+      if (!room) continue;
+
       const player = room.players.find((p) => p.id === socket.id);
 
       if (player) {
         player.isOnline = false;
 
         // Notify room that player is offline
-        io.to(roomId).emit("player_updated", player); // Or specific "player_offline" event
+        io.to(roomId).emit("player_updated", player);
 
         // Check if everyone is offline
         const onlinePlayers = room.players.filter((p) => p.isOnline);
@@ -496,16 +473,13 @@ io.on("connection", (socket) => {
           io.to(roomId).emit("host_migrated", { newHostId: newHost.id });
         }
 
+        // Update room state (resets TTL)
+        await updateRoom(roomId, room);
+
+        // No manual cleanup needed - Keyv TTL handles expiration after 1 hour
         if (onlinePlayers.length === 0) {
-          // Schedule destruction
           console.log(
-            `Room ${roomId} is empty. Scheduling cleanup in ${
-              EMPTY_ROOM_TIMEOUT / 60000
-            } minutes.`
-          );
-          room.destroyTimeout = setTimeout(
-            () => cleanupRoom(roomId),
-            EMPTY_ROOM_TIMEOUT
+            `Room ${roomId} is empty. Will auto-delete after 1 hour of inactivity.`
           );
         }
         break;

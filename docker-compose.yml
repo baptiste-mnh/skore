@@ -1,4 +1,13 @@
 services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+
   client:
     build:
       context: ./client
@@ -25,3 +34,10 @@ services:
     environment:
       - PORT=3000
       - NODE_ENV=development
+      - KEYV_URI=redis://redis:6379
+      - ROOM_TTL_MS=3600000
+    depends_on:
+      - redis
+
+volumes:
+  redis_data:
