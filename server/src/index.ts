@@ -9,7 +9,14 @@ import express from "express";
 import cors from "cors";
 import path from "path";
 import rateLimit from "express-rate-limit";
-import { createRoom, getRoom, updateRoom, deleteRoom, socketStore, SOCKET_TTL } from "./services/store";
+import {
+  createRoom,
+  getRoom,
+  updateRoom,
+  deleteRoom,
+  socketStore,
+  SOCKET_TTL,
+} from "./services/store";
 import type { Room, Player } from "./types/room";
 import bcrypt from "bcrypt";
 import {
@@ -43,9 +50,7 @@ if (isProduction) {
     console.error(
       "🔴 FATAL: KEYV_URI must be set in production (Redis required for persistence)!"
     );
-    console.error(
-      "   Example: KEYV_URI=redis://username:password@host:6379"
-    );
+    console.error("   Example: KEYV_URI=redis://username:password@host:6379");
     process.exit(1);
   }
 
@@ -128,7 +133,7 @@ const io = new Server(httpServer, {
       return callback(null, true);
     }
 
-    console.log(`🚫 Blocked connection from unauthorized origin: ${origin}`);
+    console.debug(`🚫 Blocked connection from unauthorized origin: ${origin}`);
     callback(null, false);
   },
 });
@@ -149,7 +154,7 @@ const generateOfflinePlayerId = (): string => {
 };
 
 io.on("connection", (socket) => {
-  console.log(`User connected: ${socket.id}`);
+  console.debug(`User connected: ${socket.id}`);
 
   // Clean up rate limit record on disconnect
   socket.on("disconnect", () => {
@@ -224,8 +229,10 @@ io.on("connection", (socket) => {
         isPrivate: passwordHash !== null,
       });
 
-      console.log(
-        `Room created: ${roomId} by ${cleanName} (${passwordHash ? "private" : "public"})`
+      console.debug(
+        `Room created: ${roomId} by ${cleanName} (${
+          passwordHash ? "private" : "public"
+        })`
       );
     }
   );
@@ -238,9 +245,7 @@ io.on("connection", (socket) => {
         isPrivate: room.passwordHash !== null,
       });
     } else {
-      console.log("🚀 ~ check_room ~ emit app_error");
       socket.emit("app_error", { message: "Room not found" });
-      console.log("🚀 ~ check_room ~ emit app_error done");
     }
   });
 
@@ -294,7 +299,10 @@ io.on("connection", (socket) => {
             return;
           }
 
-          const passwordMatch = await bcrypt.compare(password, room.passwordHash);
+          const passwordMatch = await bcrypt.compare(
+            password,
+            room.passwordHash
+          );
           if (passwordMatch) {
             authorized = true;
             await clearPasswordAttempts(
@@ -323,10 +331,7 @@ io.on("connection", (socket) => {
         return;
       }
 
-      const cleanName = (playerName || "Player").substring(
-        0,
-        MAX_NAME_LENGTH
-      );
+      const cleanName = (playerName || "Player").substring(0, MAX_NAME_LENGTH);
 
       const newPlayer: Player = {
         id: socket.id,
@@ -360,7 +365,7 @@ io.on("connection", (socket) => {
         accessToken: newAccessToken,
         isPrivate: room.passwordHash !== null,
       });
-      console.log(`User ${cleanName} joined room ${roomId}`);
+      console.debug(`User ${cleanName} joined room ${roomId}`);
     }
   );
 
@@ -419,7 +424,7 @@ io.on("connection", (socket) => {
       await updateRoom(roomId, room);
 
       io.to(roomId).emit("player_joined", offlinePlayer);
-      console.log(
+      console.debug(
         `Offline player ${cleanName} added to room ${roomId} by host`
       );
     }
@@ -474,7 +479,10 @@ io.on("connection", (socket) => {
             return;
           }
 
-          const passwordMatch = await bcrypt.compare(password, room.passwordHash);
+          const passwordMatch = await bcrypt.compare(
+            password,
+            room.passwordHash
+          );
           if (passwordMatch) {
             authorized = true;
             await clearPasswordAttempts(
@@ -538,7 +546,7 @@ io.on("connection", (socket) => {
         accessToken: newAccessToken,
         isPrivate: room.passwordHash !== null,
       });
-      console.log(
+      console.debug(
         `User ${player.name} rejoined room ${roomId} (old: ${previousId}, new: ${socket.id})`
       );
     }
@@ -592,45 +600,48 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("remove_player", async (data: { roomId: string; playerId: string }) => {
-    const { roomId, playerId } = data;
-    const room = await getRoom(roomId);
-    if (room) {
-      // Verify that the requester is the host
-      const requester = room.players.find((p) => p.id === socket.id);
-      if (!requester || !requester.isHost) {
-        socket.emit("app_error", {
-          message: "Only the host can remove players",
-        });
-        return;
+  socket.on(
+    "remove_player",
+    async (data: { roomId: string; playerId: string }) => {
+      const { roomId, playerId } = data;
+      const room = await getRoom(roomId);
+      if (room) {
+        // Verify that the requester is the host
+        const requester = room.players.find((p) => p.id === socket.id);
+        if (!requester || !requester.isHost) {
+          socket.emit("app_error", {
+            message: "Only the host can remove players",
+          });
+          return;
+        }
+
+        // Find the player to remove
+        const playerToRemove = room.players.find((p) => p.id === playerId);
+        if (!playerToRemove) {
+          socket.emit("app_error", { message: "Player not found" });
+          return;
+        }
+
+        // Only allow removing offline players
+        if (playerToRemove.isOnline) {
+          socket.emit("app_error", { message: "Cannot remove online players" });
+          return;
+        }
+
+        // Remove the player from the room
+        room.players = room.players.filter((p) => p.id !== playerId);
+        await updateRoom(roomId, room);
+
+        // Notify all clients in the room
+        io.to(roomId).emit("player_removed", { playerId });
+        console.debug(
+          `Player ${playerToRemove.name} removed from room ${roomId} by host`
+        );
+      } else {
+        socket.emit("app_error", { message: "Room not found" });
       }
-
-      // Find the player to remove
-      const playerToRemove = room.players.find((p) => p.id === playerId);
-      if (!playerToRemove) {
-        socket.emit("app_error", { message: "Player not found" });
-        return;
-      }
-
-      // Only allow removing offline players
-      if (playerToRemove.isOnline) {
-        socket.emit("app_error", { message: "Cannot remove online players" });
-        return;
-      }
-
-      // Remove the player from the room
-      room.players = room.players.filter((p) => p.id !== playerId);
-      await updateRoom(roomId, room);
-
-      // Notify all clients in the room
-      io.to(roomId).emit("player_removed", { playerId });
-      console.log(
-        `Player ${playerToRemove.name} removed from room ${roomId} by host`
-      );
-    } else {
-      socket.emit("app_error", { message: "Room not found" });
     }
-  });
+  );
 
   socket.on("signal", async (data) => {
     // 4. Signal Security: Target Validation & Payload Size Check
@@ -674,21 +685,23 @@ io.on("connection", (socket) => {
   });
 
   socket.on("disconnect", async () => {
-    console.log(`🔌 User disconnected: ${socket.id}`);
+    console.debug(`🔌 User disconnected: ${socket.id}`);
 
     // Get the room ID from our tracking store (socket.rooms is empty during disconnect)
     const roomId = await socketStore.get(socket.id);
 
     if (!roomId) {
-      console.log(`⚠️  No room found for disconnected socket ${socket.id}`);
+      console.debug(`⚠️  No room found for disconnected socket ${socket.id}`);
       return;
     }
 
-    console.log(`🔍 Found room ${roomId} for disconnected socket ${socket.id}`);
+    console.debug(
+      `🔍 Found room ${roomId} for disconnected socket ${socket.id}`
+    );
     const room = await getRoom(roomId);
 
     if (!room) {
-      console.log(`⚠️  Room ${roomId} not found in store`);
+      console.debug(`⚠️  Room ${roomId} not found in store`);
       // Clean up socket mapping
       await socketStore.delete(socket.id);
       return;
@@ -697,7 +710,9 @@ io.on("connection", (socket) => {
     const player = room.players.find((p) => p.id === socket.id);
 
     if (player) {
-      console.log(`👤 Found player ${player.name} (${player.id}) in room ${roomId}, isHost: ${player.isHost}`);
+      console.debug(
+        `👤 Found player ${player.name} (${player.id}) in room ${roomId}, isHost: ${player.isHost}`
+      );
       player.isOnline = false;
 
       // Notify room that player is offline
@@ -705,7 +720,7 @@ io.on("connection", (socket) => {
 
       // Check if everyone is offline
       const onlinePlayers = room.players.filter((p) => p.isOnline);
-      console.log(`📊 Online players remaining: ${onlinePlayers.length}`);
+      console.debug(`📊 Online players remaining: ${onlinePlayers.length}`);
 
       // Host Migration (only to online players)
       if (player.isHost && onlinePlayers.length > 0) {
@@ -714,7 +729,9 @@ io.on("connection", (socket) => {
         player.isHost = false;
         room.hostId = newHost.id;
         io.to(roomId).emit("host_migrated", { newHostId: newHost.id });
-        console.log(`👑 Host migrated in room ${roomId}: ${player.name} -> ${newHost.name}`);
+        console.debug(
+          `👑 Host migrated in room ${roomId}: ${player.name} -> ${newHost.name}`
+        );
       }
 
       // Update room state (resets TTL)
@@ -722,13 +739,19 @@ io.on("connection", (socket) => {
 
       // No manual cleanup needed - Keyv TTL handles expiration after 1 hour
       if (onlinePlayers.length === 0) {
-        console.log(
+        console.debug(
           `🏚️  Room ${roomId} is empty. Will auto-delete after 1 hour of inactivity.`
         );
       }
     } else {
-      console.log(`⚠️  Socket ${socket.id} not found in room ${roomId} players list`);
-      console.log(`📋 Current players in room: ${room.players.map(p => `${p.name}(${p.id})`).join(", ")}`);
+      console.debug(
+        `⚠️  Socket ${socket.id} not found in room ${roomId} players list`
+      );
+      console.debug(
+        `📋 Current players in room: ${room.players
+          .map((p) => `${p.name}(${p.id})`)
+          .join(", ")}`
+      );
     }
 
     // Clean up socket-to-room mapping
@@ -739,5 +762,5 @@ io.on("connection", (socket) => {
 const PORT = process.env.PORT || 4000;
 const HOST = process.env.HOST || "0.0.0.0"; // Listen on all interfaces for Docker/reverse proxy
 httpServer.listen(Number(PORT), HOST, () => {
-  console.log(`Server running on ${HOST}:${PORT}`);
+  console.debug(`Server running on ${HOST}:${PORT}`);
 });
